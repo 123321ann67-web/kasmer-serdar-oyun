@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stress Fighter: Kaşmer Serdar Edition</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: radial-gradient(circle at center, #e0e0e0, #a0a0a0); /* Soft Arka Plan */
+            font-family: 'Segoe UI', sans-serif;
+            user-select: none;
+        }
+        canvas { display: block; }
+        
+        /* EFEKTLER */
+        #vignette {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.4) 100%);
+            pointer-events: none; z-index: 10;
+        }
+        #blood-splatter {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="10" fill="red" opacity="0.05"/></svg>');
+            opacity: 0; pointer-events: none; z-index: 9; transition: opacity 0.1s;
+            mix-blend-mode: multiply;
+        }
+
+        /* BİLGİ EKRANI */
+        #info-panel {
+            position: absolute; top: 20px; right: 20px; text-align: right; z-index: 20;
+        }
+        .score-val { color: #b71c1c; font-size: 32px; font-weight: 900; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+        .risk-val { color: #d32f2f; font-size: 24px; font-weight: bold; }
+        .hint { color: #555; font-size: 14px; margin-top: 5px; font-weight: 600; }
+
+        /* OYUN SONU */
+        #game-over {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 100; display: none;
+        }
+        h1 { color: #d32f2f; font-size: 50px; margin: 0; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 20px red; }
+        p { color: #ccc; margin-bottom: 30px; font-size: 18px; }
+        .btn {
+            background: #b71c1c; border: none; color: #fff;
+            padding: 15px 40px; font-size: 18px; cursor: pointer;
+            transition: 0.2s; font-family: 'Segoe UI', sans-serif; font-weight: bold;
+            border-radius: 5px;
+        }
+        .btn:hover { background: #f44336; transform: scale(1.05); }
+
+        /* KONTROLLER */
+        #toolbar {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 30px; z-index: 20;
+        }
+        .action-btn {
+            width: 80px; height: 80px;
+            background: rgba(255,255,255,0.8);
+            border: 2px solid rgba(0,0,0,0.1);
+            border-radius: 12px; cursor: pointer;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 40px; color: #333;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transition: 0.05s; position: relative;
+        }
+        .action-btn:active { transform: scale(0.95); border-color: #d32f2f; color: #d32f2f; background: #fff; }
+        
+        .key { position: absolute; top: 5px; left: 5px; font-size: 10px; color: #555; }
+
+        /* AFFET */
+        #mercy-btn {
+            position: absolute; bottom: 140px; left: 50%; transform: translateX(-50%);
+            background: #4caf50; color: #fff; border: none;
+            padding: 12px 36px; cursor: pointer; font-family: 'Segoe UI', sans-serif;
+            font-weight: bold; border-radius: 30px; font-size: 18px;
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4); transition: 0.2s; z-index: 20;
+        }
+        #mercy-btn:hover { transform: translateX(-50%) scale(1.05); background: #66bb6a; }
+
+    </style>
+</head>
+<body>
+
+<div id="vignette"></div>
+<div id="blood-splatter"></div>
+
+<div id="info-panel">
+    <div class="score-val" id="score">PUAN: 0</div>
+    <div class="risk-val" id="risk">RİSK: x1.0</div>
+    <div class="hint">Dayanıklılık: BİLİNMİYOR</div>
+</div>
+
+<div id="game-over">
+    <h1 id="end-title">SERDARI BELLEDİN ÖLDÜ</h1>
+    <p id="end-desc">Aşırı travma sonucu mefta.</p>
+    <div id="end-score" style="color:#fff; font-size:24px; margin-bottom:20px;"></div>
+    <button class="btn" onclick="resetGame()">YENİ KURBAN GETİR</button>
+</div>
+
+<button id="mercy-btn" onclick="finishGame()">YETER (AFFET)</button>
+
+<div id="toolbar">
+    <div class="action-btn" onclick="attack('slap')" title="Tokat"><span class="key">1</span>🤚</div>
+    <div class="action-btn" onclick="attack('punch')" title="Yumruk"><span class="key">2</span>👊</div>
+    <div class="action-btn" onclick="attack('kick')" title="Tekme"><span class="key">3</span>🦵</div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const riskEl = document.getElementById('risk');
+    const splatterEl = document.getElementById('blood-splatter');
+    const gameOverScreen = document.getElementById('game-over');
+
+    let width = canvas.width = window.innerWidth;
+    let height = canvas.height = window.innerHeight;
+
+    // --- OYUN DURUMU ---
+    let state = {
+        score: 0,
+        damage: 0,
+        multiplier: 1.0,
+        deathLimit: 0,
+        isDead: false,
+        isFinished: false,
+        
+        // Fiziksel
+        shake: {x:0, y:0},
+        rotation: 0,
+        headPos: {x:0, y:0},
+        
+        // Hasar Verileri
+        wounds: [],
+        bloodTrails: [],
+        swelling: 0,
+        
+        // Organ Durumları
+        leftEye: { closed: 0, bruised: 0 },
+        rightEye: { closed: 0, bruised: 0 },
+        nose: { broken: false, offset: 0, bleed: 0 },
+        mouth: { broken: false, teeth: [1,1,1,1,1,1], bleed: 0 }
+    };
+
+    let particles = []; // Kan, diş
+    let limbs = [];     // Saldırı animasyonları
+    let texts = [];     // Puan yazıları
+
+    // --- BAŞLATMA ---
+    function init() {
+        state = {
+            score: 0, damage: 0, multiplier: 1.0,
+            deathLimit: 1500 + Math.random() * 2500, // Rastgele dayanıklılık
+            isDead: false, isFinished: false,
+            shake: {x:0, y:0}, rotation: 0, headPos: {x:width/2, y:height/2-50},
+            wounds: [], bloodTrails: [], swelling: 0,
+            leftEye: { closed:0, bruised:0 }, rightEye: { closed:0, bruised:0 },
+            nose: { broken:false, offset:0, bleed:0 },
+            mouth: { broken:false, teeth:[1,1,1,1,1,1], bleed:0 }
+        };
+        particles = []; limbs = []; texts = [];
+        
+        gameOverScreen.style.display = 'none';
+        document.getElementById('mercy-btn').style.display = 'block';
+        updateUI();
+    }
+
+    function updateUI() {
+        scoreEl.innerText = "PUAN: " + Math.floor(state.score);
+        riskEl.innerText = "RİSK: x" + state.multiplier.toFixed(1);
+        
+        // Risk rengi
+        if(state.multiplier > 3) riskEl.style.color = "#ff0000";
+        else if(state.multiplier > 2) riskEl.style.color = "#ff5722";
+        else riskEl.style.color = "#d32f2f";
+    }
+
+    // --- SALDIRI MOTORU ---
+    class Limb {
+        constructor(type) {
+            this.type = type;
+            this.progress = 0;
+            this.speed = (type === 'kick') ? 0.06 : 0.09;
+            this.state = 'in';
+            
+            const cx = state.headPos.x;
+            const cy = state.headPos.y;
+            
+            let targets = [
+                {x: cx-40, y: cy-30, part: 'leftEye'},
+                {x: cx+40, y: cy-30, part: 'rightEye'},
+                {x: cx, y: cy+30, part: 'nose'},
+                {x: cx, y: cy+90, part: 'mouth'}
+            ];
+            if(type === 'kick') targets = targets.slice(2,4);
+            
+            this.target = targets[Math.floor(Math.random() * targets.length)];
+            
+            this.side = Math.random()>0.5 ? 1 : -1;
+            if(type === 'punch') { this.sx = this.side*width; this.sy = this.target.y+50; }
+            else if(type === 'slap') { this.sx = this.side*width*1.2; this.sy = this.target.y-100; }
+            else { this.sx = this.side*width*0.5; this.sy = height+200; } // Kick
+
+            this.x = this.sx; this.y = this.sy;
+        }
+
+        update() {
+            if(this.state === 'in') {
+                this.progress += this.speed;
+                let t = this.progress;
+                let ease = t * t * (3 - 2 * t);
+                this.x = this.sx + (this.target.x - this.sx) * ease;
+                this.y = this.sy + (this.target.y - this.sy) * ease;
+
+                if(this.progress >= 1) {
+                    this.hit();
+                    this.state = 'out';
+                }
+            } else {
+                this.progress -= this.speed * 0.6;
+                if(this.progress <= 0) return false;
+                this.x = this.sx + (this.target.x - this.sx) * this.progress;
+                this.y = this.sy + (this.target.y - this.sy) * this.progress;
+            }
+            return true;
+        }
+
+        hit() {
+            if(state.isDead || state.isFinished) return;
+
+            let baseForce = this.type==='kick' ? 80 : (this.type==='punch' ? 50 : 25);
+            let force = baseForce + (Math.random()*20);
+
+            // Risk Çarpanı Hesapla (Hasar arttıkça artar)
+            state.multiplier = 1 + (state.damage / 800);
+            
+            // Puan Hesapla
+            let points = force * state.multiplier;
+            state.score += points;
+            state.damage += force;
+
+            updateUI();
+
+            // Fiziksel Tepki
+            state.shake.x = force * this.side * -1.5;
+            state.shake.y = force * 0.8;
+            state.rotation = force * 0.4 * this.side * -1;
+
+            // Efektler
+            splatterEl.style.opacity = Math.min(0.8, force/100);
+            setTimeout(() => splatterEl.style.opacity = 0, 50);
+
+            // HASAR UYGULA
+            applyGore(this.target, force, this.type);
+            
+            // Sıçrama
+            spawnGoreParticles(this.target.x, this.target.y, force/2, 'blood');
+            
+            // POP-UP YAZILAR (Comic Style)
+            const words = ["ÇAT!", "KÜT!", "GÜM!", "PAT!", "AH!", "OF!", "BAM!", "ÇOT!", "ZANK!", "HAYDA!", "YAVAŞ!"];
+            const word = words[Math.floor(Math.random() * words.length)];
+            spawnText(this.target.x, this.target.y, word);
+
+            // Ölüm
+            if(state.damage >= state.deathLimit) die();
+        }
+
+        draw() {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            let angle = Math.atan2(this.target.y - this.sy, this.target.x - this.sx);
+            ctx.rotate(angle);
+
+            // Kol Çizimi (Daha aydınlık)
+            const grad = ctx.createLinearGradient(-300, 0, 50, 0);
+            grad.addColorStop(0, "#8d6e63"); grad.addColorStop(1, "#e0ac69");
+            ctx.fillStyle = grad;
+
+            if(this.type === 'kick') { // Ayak
+                ctx.fillStyle = "#333"; // Bot
+                ctx.beginPath(); ctx.ellipse(20, 0, 80, 45, 0, 0, Math.PI*2); ctx.fill();
+                if(state.damage > 500) {
+                    ctx.fillStyle = "rgba(150,0,0,0.5)";
+                    ctx.beginPath(); ctx.arc(60, 0, 25, 0, Math.PI*2); ctx.fill();
+                }
+                ctx.fillStyle = "#1a237e"; // Pantolon
+                ctx.fillRect(-600, -40, 600, 80);
+            } else { // El
+                ctx.fillStyle = "#fff"; ctx.fillRect(-600, -35, 580, 70); // Gömlek
+                ctx.fillStyle = "#e0ac69"; // Ten
+                if(this.type === 'punch') {
+                    // Yumruk
+                    ctx.beginPath(); ctx.arc(0, 0, 50, 0, Math.PI*2); ctx.fill();
+                    // Boğumlar (Kızarık)
+                    ctx.fillStyle = "rgba(180,0,0,0.3)";
+                    ctx.beginPath(); ctx.arc(25, -15, 12, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(30, 10, 12, 0, Math.PI*2); ctx.fill();
+                } else {
+                    // Tokat
+                    ctx.beginPath(); ctx.roundRect(-20, -50, 80, 100, 10); ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+    }
+
+    // --- HASAR MANTIĞI ---
+    function applyGore(target, force, type) {
+        state.swelling = Math.min(60, state.swelling + force/8);
+
+        if(target.part === 'nose') {
+            if(force > 60 && !state.nose.broken) {
+                state.nose.broken = true;
+                state.nose.offset = (Math.random()-0.5)*30;
+                spawnText(target.x, target.y, "KIRILDI!");
+                spawnGoreParticles(target.x, target.y, 5, 'bone');
+            }
+            state.nose.bleed += force;
+        }
+        else if(target.part === 'leftEye' || target.part === 'rightEye') {
+            let eye = state[target.part];
+            eye.bruised += force;
+            eye.closed = Math.min(100, eye.closed + force);
+        }
+        else if(target.part === 'mouth') {
+            state.mouth.bleed += force;
+            if(force > 40) {
+                let idx = Math.floor(Math.random()*6);
+                if(state.mouth.teeth[idx] === 1) {
+                    state.mouth.teeth[idx] = 0;
+                    spawnGoreParticles(target.x, target.y, 1, 'tooth');
+                    spawnText(target.x, target.y, "DİŞ!");
+                }
+            }
+        }
+
+        let woundType = 'bruise';
+        if((type === 'punch' || type === 'kick') && Math.random() > 0.4) woundType = 'cut';
+        
+        let dx = (target.x - state.headPos.x);
+        let dy = (target.y - state.headPos.y);
+
+        state.wounds.push({
+            dx: dx, dy: dy,
+            type: woundType,
+            size: 15 + Math.random()*20,
+            angle: (Math.random()-0.5) * Math.PI,
+            depth: Math.random(),
+            age: Date.now()
+        });
+
+        if(woundType === 'cut') {
+            state.bloodTrails.push({
+                dx: dx, dy: dy,
+                length: 0,
+                maxLength: 50 + Math.random()*150,
+                width: 2 + Math.random()*3
+            });
+        }
+    }
+
+    // --- ÇİZİM MOTORU ---
+    function drawHead(cx, cy) {
+        ctx.save();
+        ctx.translate(cx + state.shake.x, cy + state.shake.y);
+        ctx.rotate(state.rotation * 0.03);
+        const scale = 1.0 + (state.swelling / 200);
+        ctx.scale(scale, scale);
+
+        // Ten Rengi (Hasara göre kararır/morarır)
+        let damageFactor = Math.min(1, state.damage / 2000);
+        let r = 240 - (damageFactor * 120);
+        let g = 220 - (damageFactor * 140);
+        let b = 200 - (damageFactor * 120);
+        
+        // 1. KAFA TABANI & GÖLGELENDİRME
+        const skinGrad = ctx.createRadialGradient(-30, -50, 20, 0, 0, 160);
+        skinGrad.addColorStop(0, `rgb(${r},${g},${b})`);
+        skinGrad.addColorStop(1, `rgb(${r-60},${g-60},${b-60})`);
+        ctx.fillStyle = skinGrad;
+
+        ctx.beginPath();
+        ctx.moveTo(-80, -100); // Alın
+        ctx.quadraticCurveTo(-100, 0, -70, 100); // Sol yanak
+        ctx.quadraticCurveTo(0, 170, 70, 100);   // Çene
+        ctx.quadraticCurveTo(100, 0, 80, -100);  // Sağ yanak
+        ctx.quadraticCurveTo(0, -160, -80, -100); // Tepe
+        ctx.fill();
+
+        // Çene altı gölgesi
+        ctx.fillStyle = `rgba(${r-80},${g-80},${b-80}, 0.3)`;
+        ctx.beginPath(); ctx.ellipse(0, 110, 60, 30, 0, 0, Math.PI*2); ctx.fill();
+
+        // 2. KULAKLAR (Daha detaylı)
+        ctx.fillStyle = `rgb(${r-40},${g-40},${b-40})`;
+        drawEar(-95, 0, -1);
+        drawEar(95, 0, 1);
+
+        // 3. MORLUKLAR
+        drawBruises(ctx);
+
+        // 4. ORGANLAR (Detaylı)
+        drawEyes(ctx, r, g, b);
+        drawNose(ctx, r, g, b);
+        drawMouth(ctx, r, g, b);
+
+        // 5. KESİKLER VE KANAMA
+        drawGoreDetails(ctx);
+
+        // 6. BERE VE YAZI (Saç yerine)
+        drawBeanie(ctx, 160); // 160px genişlik baz alınır
+
+        ctx.restore();
+    }
+
+    function drawEar(x, y, scaleX) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scaleX, 1);
+        ctx.beginPath();
+        ctx.moveTo(0, -30);
+        ctx.bezierCurveTo(-20, -30, -25, 0, -15, 30);
+        ctx.bezierCurveTo(0, 40, 10, 20, 10, -20);
+        ctx.bezierCurveTo(10, -40, 0, -30, 0, -30);
+        ctx.fill();
+        // İç detay
+        ctx.fillStyle = "rgba(0,0,0,0.1)";
+        ctx.beginPath();
+        ctx.moveTo(0, -10);
+        ctx.bezierCurveTo(-10, -10, -10, 10, 0, 20);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawBruises(ctx) {
+        ctx.globalCompositeOperation="multiply";
+        state.wounds.forEach(w => {
+            if(w.type !== 'bruise') return;
+            ctx.save(); ctx.translate(w.dx, w.dy);
+            const br = ctx.createRadialGradient(0,0,0,0,0,w.size);
+            br.addColorStop(0, "rgba(80,20,60,0.5)");
+            br.addColorStop(1, "rgba(80,20,60,0)");
+            ctx.fillStyle = br;
+            ctx.beginPath(); ctx.arc(0,0,w.size,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+        });
+        ctx.globalCompositeOperation="source-over";
+    }
+
+    function drawEyes(ctx, r, g, b) {
+        const eyeY = -30;
+        
+        function drawOne(x, organ) {
+            let open = Math.max(2, 22 - (organ.closed / 4.5));
+            
+            // Göz Çukuru Gölgesi
+            ctx.fillStyle = `rgba(${r-90},${g-90},${b-90}, 0.4)`;
+            ctx.beginPath(); ctx.ellipse(x, eyeY+5, 26, 24, 0, 0, Math.PI*2); ctx.fill();
+
+            // Göz Akı (Kanlanmış)
+            let bloodShot = Math.min(255, organ.bruised * 1.5);
+            ctx.fillStyle = `rgb(255, ${255-bloodShot}, ${255-bloodShot})`;
+            ctx.beginPath(); ctx.ellipse(x, eyeY, 22, open, 0, 0, Math.PI*2); ctx.fill();
+            // Kenar çizgisi
+            ctx.strokeStyle = `rgba(${r-100},${g-100},${b-100}, 0.5)`; ctx.lineWidth = 1; ctx.stroke();
+
+            // İris ve Göz Bebeği (Detaylı)
+            if(open > 6) {
+                ctx.save();
+                ctx.beginPath(); ctx.ellipse(x, eyeY, 22, open, 0, 0, Math.PI*2); ctx.clip();
+                
+                // İris
+                const irisGrad = ctx.createRadialGradient(x, eyeY, 4, x, eyeY, 11);
+                irisGrad.addColorStop(0, "#5d4037"); irisGrad.addColorStop(0.7, "#3e2723"); irisGrad.addColorStop(1, "#281a14");
+                ctx.fillStyle = irisGrad;
+                ctx.beginPath(); ctx.arc(x, eyeY, 11, 0, Math.PI*2); ctx.fill();
+                
+                // Göz Bebeği
+                ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(x, eyeY, 5, 0, Math.PI*2); ctx.fill();
+                // Parlama
+                ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.beginPath(); ctx.arc(x+3, eyeY-3, 2.5, 0, Math.PI*2); ctx.fill();
+                ctx.restore();
+            }
+
+            // Göz Kapağı Şişliği (Mor)
+            if(organ.closed > 10) {
+                ctx.strokeStyle = "rgba(120,30,30,0.6)"; ctx.lineWidth = 5;
+                ctx.beginPath(); ctx.arc(x, eyeY - open + 2, 24, 0.2, Math.PI-0.2, true); ctx.stroke();
+                ctx.beginPath(); ctx.arc(x, eyeY + open - 2, 24, -0.2, -Math.PI+0.2, false); ctx.stroke();
+            }
+        }
+        drawOne(-45, state.leftEye);
+        drawOne(45, state.rightEye);
+
+        // Kaşlar (Detaylı)
+        ctx.strokeStyle = "#222"; ctx.lineWidth=10; ctx.lineCap="round";
+        let browOff = state.damage > 500 ? 15 : 5;
+        ctx.beginPath(); ctx.moveTo(-75,-65+browOff); ctx.quadraticCurveTo(-50,-75, -20,-55+browOff); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(75,-65+browOff); ctx.quadraticCurveTo(50,-75, 20,-55+browOff); ctx.stroke();
+        // Kaş kılı efekti
+        ctx.lineWidth=2; ctx.strokeStyle = "#333";
+        for(let i=0; i<10; i++) {
+             ctx.beginPath(); ctx.moveTo(-75+i*5,-65+browOff); ctx.lineTo(-70+i*5,-70+browOff); ctx.stroke();
+             ctx.beginPath(); ctx.moveTo(75-i*5,-65+browOff); ctx.lineTo(70-i*5,-70+browOff); ctx.stroke();
+        }
+    }
+
+    function drawNose(ctx, r, g, b) {
+        ctx.save();
+        if(state.nose.broken) ctx.translate(state.nose.offset, 0);
+        
+        // Burun Gövdesi (Gölge ile hacim)
+        ctx.fillStyle = `rgba(${r-40},${g-40},${b-40}, 0.6)`; // Yan gölgeler
+        ctx.beginPath(); ctx.moveTo(-15,20); ctx.lineTo(-20,55); ctx.lineTo(0,65); ctx.lineTo(20,55); ctx.lineTo(15,20); ctx.fill();
+        
+        ctx.fillStyle = `rgb(${r},${g},${b})`; // Burun ucu (aydınlık)
+        ctx.beginPath(); ctx.arc(0, 45, 18, 0, Math.PI*2); ctx.fill();
+        
+        // Burun Delikleri
+        ctx.fillStyle = "#2e1c16";
+        ctx.beginPath(); ctx.ellipse(-10, 55, 6, 4, Math.PI/4, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(10, 55, 6, 4, -Math.PI/4, 0, Math.PI*2); ctx.fill();
+
+        // Kanama
+        if(state.nose.bleed > 20) {
+            ctx.fillStyle = "#b71c1c";
+            ctx.beginPath(); ctx.moveTo(-8, 58); ctx.lineTo(-8, 58 + state.nose.bleed/1.5); ctx.lineTo(-14, 58); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(8, 58); ctx.lineTo(8, 58 + state.nose.bleed/2); ctx.lineTo(14, 58); ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawMouth(ctx, r, g, b) {
+        // Dudaklar (Detaylı)
+        let lipColor = state.mouth.bleed > 30 ? "#b71c1c" : `rgb(${r-30},${g-50},${b-40})`;
+        
+        // Üst Dudak
+        ctx.fillStyle = lipColor;
+        ctx.beginPath(); ctx.moveTo(-35, 90); ctx.quadraticCurveTo(0, 80, 35, 90); ctx.quadraticCurveTo(0, 100, -35, 90); ctx.fill();
+        // Alt Dudak
+        ctx.beginPath(); ctx.moveTo(-35, 90); ctx.quadraticCurveTo(0, 115, 35, 90); ctx.quadraticCurveTo(0, 100, -35, 90); ctx.fill();
+        
+        // Ağız İçi
+        ctx.fillStyle = "#3e1c16";
+        ctx.beginPath(); ctx.ellipse(0, 95, 30, 10, 0, 0, Math.PI*2); ctx.fill();
+
+        // Dişler
+        ctx.fillStyle = "#f0f0f0";
+        let tx = -20;
+        state.mouth.teeth.forEach(t => {
+            if(t === 1) {
+                ctx.fillRect(tx, 88, 10, 10);
+                ctx.strokeStyle = "#ccc"; ctx.lineWidth=1; ctx.strokeRect(tx,88,10,10);
+            }
+            tx += 14;
+        });
+    }
+
+    function drawGoreDetails(ctx) {
+        // Süzülen Kanlar
+        state.bloodTrails.forEach(b => {
+            b.length = Math.min(b.length + 0.5, b.maxLength);
+            ctx.strokeStyle = "rgba(180, 0, 0, 0.9)";
+            ctx.lineWidth = b.width; ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(b.dx, b.dy);
+            let sway = Math.sin(b.length/10) * 5;
+            ctx.quadraticCurveTo(b.dx + sway, b.dy + b.length/2, b.dx, b.dy + b.length);
+            ctx.stroke();
+        });
+
+        // Açık Yaralar
+        state.wounds.forEach(w => {
+            if(w.type !== 'cut') return;
+            ctx.save(); ctx.translate(w.dx, w.dy); ctx.rotate(w.angle);
+            // Pıhtı
+            ctx.fillStyle = "#5a0000"; 
+            ctx.beginPath(); ctx.ellipse(0,0, w.size, 4, 0, 0, Math.PI*2); ctx.fill();
+            // Kenar (İltihap)
+            ctx.shadowColor = "#d32f2f"; ctx.shadowBlur = 8;
+            ctx.strokeStyle = "rgba(150,20,20,0.8)"; ctx.lineWidth=2;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.restore();
+        });
+    }
+
+    function drawBeanie(ctx, w) {
+        const radius = w / 2 + 5; 
+        
+        ctx.save();
+        
+        const beanieColor = "#151515";
+        const foldColor = "#222";
+
+        // Ana Gövde
+        ctx.fillStyle = beanieColor;
+        ctx.beginPath();
+        ctx.moveTo(-radius, -60); 
+        ctx.bezierCurveTo(-radius, -180, radius, -180, radius, -60);
+        ctx.bezierCurveTo(radius, -40, -radius, -40, -radius, -60);
+        ctx.fill();
+
+        // Manşet
+        ctx.fillStyle = foldColor;
+        ctx.beginPath();
+        let cuffH = 40; let cuffY = -60;
+        ctx.moveTo(-radius - 2, cuffY - cuffH);
+        ctx.quadraticCurveTo(0, cuffY - cuffH - 10, radius + 2, cuffY - cuffH);
+        ctx.quadraticCurveTo(radius + 2, cuffY, radius + 2, cuffY + 10);
+        ctx.quadraticCurveTo(0, cuffY + 25, -radius - 2, cuffY + 10);
+        ctx.lineTo(-radius - 2, cuffY - cuffH);
+        ctx.fill();
+        
+        // Doku
+        ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for(let i=-75; i<=75; i+=5) {
+            let yCurve = -65 + Math.abs(i)*0.1; 
+            ctx.moveTo(i, -90); ctx.lineTo(i, -45 + Math.abs(i)*0.15); 
+        }
+        ctx.stroke();
+
+        // Yazı
+        ctx.fillStyle = "#fff";
+        ctx.font = "900 18px 'Arial', sans-serif";
+        ctx.textAlign = "center";
+        ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 2; ctx.shadowOffsetY = 2;
+        
+        ctx.fillText("KAŞMER", 0, cuffY - 15);
+        ctx.fillText("SERDAR", 0, cuffY + 5);
+
+        ctx.restore();
+    }
+
+    // --- PARTİKÜLLER ---
+    function spawnGoreParticles(x, y, count, type) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x:x, y:y, 
+                vx:(Math.random()-0.5)*15, vy:(Math.random()-0.5)*15,
+                size: Math.random()*5+3,
+                color: type==='blood'?'#b71c1c':'#f0f0f0',
+                type: type, life: 1.0, gravity: 0.8
+            });
+        }
+    }
+
+    function spawnText(x, y, text) {
+        texts.push({
+            x: x,
+            y: y,
+            text: text,
+            life: 1.0,
+            scale: 0.5,
+            vy: -3 - Math.random() * 3,
+            vx: (Math.random() - 0.5) * 4,
+            color: `hsl(${Math.random() * 60}, 100%, 50%)` // Kırmızı-Sarı tonları
+        });
+    }
+
+    function attack(type) { limbs.push(new Limb(type)); }
+
+    function finishGame() {
+        if(state.isDead) return;
+        state.isFinished = true;
+        document.getElementById('game-over').style.display = 'flex';
+        document.getElementById('end-title').innerText = "AFFETTİN";
+        document.getElementById('end-title').style.color = "#4caf50";
+        document.getElementById('end-desc').innerText = "Serdar hayatta kaldı (şimdilik).";
+        document.getElementById('end-score').innerText = "TOPLAM PUAN: " + Math.floor(state.score);
+        document.getElementById('mercy-btn').style.display = 'none';
+    }
+
+    function die() {
+        state.isDead = true;
+        document.getElementById('game-over').style.display = 'flex';
+        document.getElementById('end-title').innerText = "SERDARI BELLEDİN ÖLDÜ";
+        document.getElementById('end-title').style.color = "#d32f2f";
+        document.getElementById('end-desc').innerText = "Aşırı travma sonucu mefta.";
+        document.getElementById('end-score').innerText = "PUAN GEÇERSİZ";
+        document.getElementById('mercy-btn').style.display = 'none';
+        spawnGoreParticles(width/2, height/2, 150, 'blood');
+    }
+
+    window.resetGame = init;
+
+    // --- LOOP ---
+    function loop() {
+        ctx.clearRect(0,0,width,height);
+
+        state.shake.x *= 0.8; state.shake.y *= 0.8; state.rotation *= 0.9;
+
+        const cx = width/2; const cy = height/2;
+        // Vücut (Daha detaylı gömlek)
+        ctx.fillStyle = "#e0e0e0"; ctx.beginPath(); ctx.moveTo(cx-110,height); ctx.quadraticCurveTo(cx, cy+250, cx+110, height); ctx.fill();
+        // Yaka
+        ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(cx, cy+100); ctx.lineTo(cx-60, cy+60); ctx.lineTo(cx+60, cy+60); ctx.fill();
+        // Boyun
+        ctx.fillStyle = "#dcb898"; ctx.fillRect(cx-45, cy-20, 90, 150);
+        // Boyun gölgesi
+        ctx.fillStyle = "rgba(0,0,0,0.1)"; ctx.fillRect(cx-45, cy+80, 90, 50);
+
+        drawHead(cx, cy-50);
+
+        for(let i=limbs.length-1; i>=0; i--) { if(!limbs[i].update()) limbs.splice(i,1); else limbs[i].draw(); }
+        for(let i=particles.length-1; i>=0; i--) {
+            let p = particles[i];
+            p.x+=p.vx; p.y+=p.vy; p.vy+=p.gravity; p.life-=0.02;
+            if(p.life<=0) { particles.splice(i,1); continue; }
+            ctx.fillStyle=p.color; ctx.globalAlpha=p.life;
+            if(p.type==='tooth') { ctx.fillRect(p.x,p.y,8,8); ctx.strokeStyle="#ccc"; ctx.strokeRect(p.x,p.y,8,8); }
+            else { ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); }
+            ctx.globalAlpha=1;
+        }
+        for(let i=texts.length-1; i>=0; i--) {
+            let t = texts[i];
+            t.x += t.vx;
+            t.y += t.vy;
+            t.life -= 0.02;
+            t.scale = Math.min(1.5, t.scale + 0.1); // Büyüme efekti
+
+            if(t.life<=0){ texts.splice(i,1); continue; }
+
+            ctx.save();
+            ctx.translate(t.x, t.y);
+            ctx.scale(t.scale, t.scale);
+            ctx.font="900 30px 'Arial Black', sans-serif";
+            ctx.fillStyle = t.color;
+            ctx.strokeStyle = "white";
+            ctx.lineWidth = 2;
+            ctx.strokeText(t.text, 0, 0);
+            ctx.fillText(t.text, 0, 0);
+            ctx.restore();
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('resize', () => { width = canvas.width = window.innerWidth; height = canvas.height = window.innerHeight; });
+    window.addEventListener('keydown', e => {
+        if(e.key==='1') attack('slap');
+        if(e.key==='2') attack('punch');
+        if(e.key==='3') attack('kick');
+    });
+
+    init();
+    loop();
+
+</script>
+</body>
+</html>
